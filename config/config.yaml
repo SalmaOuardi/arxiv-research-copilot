@@ -1,0 +1,34 @@
+# Model Configuration
+llm:
+  provider: "openai"
+  model: "gpt-4"
+  temperature: 0.0
+  max_tokens: 2000
+
+embeddings:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimensions: 1536
+
+# Vector Database
+vector_db:
+  provider: "chromadb"
+  collection_name: "arxiv_papers"
+  persist_directory: "./data/embeddings"
+
+# Data Processing
+processing:
+  chunk_size: 1000
+  chunk_overlap: 200
+  max_papers_per_batch: 100
+
+# Retrieval
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.7
+  rerank: true
+
+# ArXiv API
+arxiv:
+  max_results: 100
+  categories: ["cs.AI", "cs.LG", "cs.CL"]
