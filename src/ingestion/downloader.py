@@ -6,6 +6,7 @@ Handles searching and downloading papers from the ArXiv API.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -57,17 +58,21 @@ class ArXivDownloader:
         self,
         output_dir: str | Path = "./data/raw",
         max_results: int = 100,
+        rate_limit_seconds: float = 3.0,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_results = max_results
+        self.rate_limit_seconds = rate_limit_seconds
         self.client = arxiv.Client()
+        self._search_cache: dict[str, list[PaperMetadata]] = {}
 
     def search_papers(
         self,
         query: str,
         max_results: Optional[int] = None,
         categories: Optional[list[str]] = None,
+        offset: int = 0,
     ) -> list[PaperMetadata]:
         """Search ArXiv for papers matching the query.
 
@@ -75,6 +80,7 @@ class ArXivDownloader:
             query: Search query string (supports ArXiv query syntax).
             max_results: Override default max results for this search.
             categories: Filter by ArXiv categories (e.g., ["cs.AI", "cs.LG"]).
+            offset: Number of results to skip (for pagination).
 
         Returns:
             List of PaperMetadata objects for matching papers.
@@ -82,21 +88,30 @@ class ArXivDownloader:
         Raises:
             arxiv.ArxivError: If the ArXiv API request fails.
         """
-        # TODO: Implement category filtering by appending to query string
-        # TODO: Add rate limiting to respect ArXiv API guidelines
-        # TODO: Add caching to avoid redundant API calls
-        # TODO: Implement pagination for large result sets
-
         effective_max = max_results or self.max_results
 
+        # Build the full query (with categories) for cache key
+        effective_query = query
+        if categories:
+            cat_filter = " OR ".join(f"cat:{cat}" for cat in categories)
+            effective_query = f"{query} AND ({cat_filter})"
+
+        # Return cached results if we've seen this exact query before
+        cache_key = f"{effective_query}::{effective_max}::{offset}"
+        if cache_key in self._search_cache:
+            logger.info("Returning cached results for: %s", effective_query)
+            return self._search_cache[cache_key]
+
         search = arxiv.Search(
-            query=query,
-            max_results=effective_max,
+            query=effective_query,
+            max_results=effective_max + offset,
             sort_by=arxiv.SortCriterion.Relevance,
         )
 
         papers: list[PaperMetadata] = []
-        for result in self.client.results(search):
+        for i, result in enumerate(self.client.results(search)):
+            if i < offset:
+                continue
             paper = PaperMetadata(
                 arxiv_id=result.entry_id.split("/")[-1],
                 title=result.title,
@@ -108,7 +123,8 @@ class ArXivDownloader:
             )
             papers.append(paper)
 
-        logger.info("Found %d papers for query: %s", len(papers), query)
+        logger.info("Found %d papers for query: %s", len(papers), effective_query)
+        self._search_cache[cache_key] = papers
         return papers
 
     def download_pdf(
@@ -138,6 +154,7 @@ class ArXivDownloader:
 
         logger.info("Downloading paper %s to %s", paper.arxiv_id, output_path)
 
+        time.sleep(self.rate_limit_seconds)
         response = requests.get(paper.pdf_url, stream=True, timeout=30)
         response.raise_for_status()
 

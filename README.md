@@ -82,7 +82,7 @@ arxiv-research-copilot/
 ## 🗺️ Roadmap
 
 - [x] Project setup and architecture
-- [ ] ArXiv data ingestion pipeline
+- [ ] ArXiv data ingestion pipeline (downloader done, PDF processing next)
 - [ ] Vector database implementation
 - [ ] Basic RAG with citations
 - [ ] Advanced retrieval (hybrid search, reranking)
