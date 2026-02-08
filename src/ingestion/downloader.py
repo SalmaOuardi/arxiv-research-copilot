@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import requests
 import arxiv
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -127,17 +129,24 @@ class ArXivDownloader:
             requests.HTTPError: If the download request fails.
             IOError: If the file cannot be written to disk.
         """
-        # TODO: Implement actual PDF download using requests
-        # TODO: Add checksum verification for downloaded files
-        # TODO: Add retry logic with exponential backoff
-        # TODO: Skip download if file already exists (deduplication)
-
         fname = filename or f"{paper.arxiv_id}.pdf"
         output_path = self.output_dir / fname
 
+        if output_path.exists():
+            logger.info("Already exists, skipping: %s", output_path)
+            return output_path
+
         logger.info("Downloading paper %s to %s", paper.arxiv_id, output_path)
 
-        raise NotImplementedError("PDF download not yet implemented")
+        response = requests.get(paper.pdf_url, stream=True, timeout=30)
+        response.raise_for_status()
+
+        with open(output_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        logger.info("Downloaded %s to %s", paper.arxiv_id, output_path)
+        return output_path
 
     def batch_download(
         self,
@@ -153,8 +162,20 @@ class ArXivDownloader:
         Returns:
             List of paths to downloaded PDF files.
         """
-        # TODO: Implement batch download with progress bar (tqdm)
-        # TODO: Add concurrent downloads with rate limiting
-        # TODO: Return summary of successes/failures
+        downloaded: list[Path] = []
 
-        raise NotImplementedError("Batch download not yet implemented")
+        for paper in tqdm(papers, desc="Downloading papers"):
+            pdf_path = self.output_dir / f"{paper.arxiv_id}.pdf"
+            if skip_existing and pdf_path.exists():
+                logger.info("Skipping existing: %s", paper.arxiv_id)
+                downloaded.append(pdf_path)
+                continue
+
+            try:
+                path = self.download_pdf(paper)
+                downloaded.append(path)
+            except requests.RequestException as e:
+                logger.warning("Failed to download %s: %s", paper.arxiv_id, e)
+
+        logger.info("Downloaded %d/%d papers", len(downloaded), len(papers))
+        return downloaded
