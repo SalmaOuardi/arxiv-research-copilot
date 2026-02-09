@@ -23,6 +23,11 @@ dependencies = [
     "tqdm>=4.66.0",
 ]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:importlib._bootstrap",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
