@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import fitz  # PyMuPDF
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -117,14 +118,7 @@ class PDFProcessor:
         Returns:
             List of TextChunk objects with text and metadata.
         """
-        # TODO: Implement recursive character text splitter
-        # TODO: Respect sentence boundaries (don't split mid-sentence)
-        # TODO: Add chunk index and position metadata
-        # TODO: Consider using LangChain's RecursiveCharacterTextSplitter
-        # TODO: Handle edge cases (very short text, single-page papers)
-
         base_metadata = metadata or {}
-        chunks: list[TextChunk] = []
 
         logger.info(
             "Chunking %d characters into ~%d-char chunks with %d overlap",
@@ -133,7 +127,28 @@ class PDFProcessor:
             self.chunk_overlap,
         )
 
-        raise NotImplementedError("Text chunking not yet implemented")
+        if not text.strip():
+            return []
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+
+        raw_chunks = splitter.split_text(text)
+
+        chunks: list[TextChunk] = []
+        for i, chunk_text in enumerate(raw_chunks):
+            chunk_metadata = {
+                **base_metadata,
+                "chunk_index": i,
+                "total_chunks": len(raw_chunks),
+            }
+            chunks.append(TextChunk(text=chunk_text, metadata=chunk_metadata))
+
+        logger.info("Created %d chunks", len(chunks))
+        return chunks
 
     def process_pdf(
         self,
@@ -149,8 +164,5 @@ class PDFProcessor:
         Returns:
             List of TextChunk objects ready for embedding.
         """
-        # TODO: Combine extract_text and chunk_text into single pipeline
-        # TODO: Add paper-level metadata (title, authors, arxiv_id)
-
         text = self.extract_text(pdf_path)
         return self.chunk_text(text, metadata=metadata)
