@@ -126,7 +126,7 @@ class ArXivDownloader:
         logger.info("Found %d papers for query: %s", len(papers), effective_query)
         self._search_cache[cache_key] = papers
         return papers
-
+    #TODO: Some of the pdfs extracted from arxiv are not excatly in the theme of the search query, we can add some filtering based on the title and abstract to make sure we are downloading relevant papers. EX: if the search query is "transformer attention mechanism", we can filter out papers that do not contain the word "transformer" or "attention" in the title or abstract.
     def download_pdf(
         self,
         paper: PaperMetadata,

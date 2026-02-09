@@ -7,9 +7,12 @@ suitable for embedding and retrieval.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +76,28 @@ class PDFProcessor:
             FileNotFoundError: If the PDF file does not exist.
             ValueError: If the backend is not supported.
         """
-        # TODO: Implement PyMuPDF (fitz) extraction backend
-        # TODO: Implement PyPDF2 extraction backend as fallback
-        # TODO: Add text cleaning (remove headers/footers, fix hyphenation)
-        # TODO: Handle multi-column layouts
-        # TODO: Extract and preserve section headings
-
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
         logger.info("Extracting text from %s using %s", pdf_path, self.backend)
 
-        raise NotImplementedError("PDF text extraction not yet implemented")
+        doc = fitz.open(pdf_path)
+        page_texts: list[str] = []
+
+        for i, page in enumerate(doc):
+            if pages is not None and i not in pages:
+                continue
+            page_texts.append(page.get_text())
+
+        doc.close()
+
+        raw_text = "\n".join(page_texts)
+
+        # Clean up: fix hyphenated line breaks and collapse whitespace
+        text = re.sub(r"-\n(\w)", r"\1", raw_text)  # re-join hyphenated words
+        text = re.sub(r"\n{3,}", "\n\n", text)       # collapse excessive newlines
+
+        return text
 
     def chunk_text(
         self,
