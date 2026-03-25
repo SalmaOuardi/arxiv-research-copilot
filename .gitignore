@@ -49,3 +49,7 @@ coverage.xml
 
 # Tool caches
 .cache/
+
+# Local project files (not for repo)
+CLAUDE.md
+TRACKER.md
