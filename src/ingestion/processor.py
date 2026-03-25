@@ -15,6 +15,8 @@ from typing import Optional
 import fitz  # PyMuPDF
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from src.ingestion.downloader import PaperMetadata
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,16 +155,31 @@ class PDFProcessor:
     def process_pdf(
         self,
         pdf_path: Path,
+        paper: Optional[PaperMetadata] = None,
         metadata: Optional[dict[str, str | int]] = None,
     ) -> list[TextChunk]:
         """End-to-end PDF processing: extract text and chunk it.
 
         Args:
             pdf_path: Path to the PDF file.
+            paper: PaperMetadata object. When provided, title, authors,
+                arxiv_id, and published date are attached to every chunk.
             metadata: Additional metadata to attach to chunks.
 
         Returns:
             List of TextChunk objects ready for embedding.
         """
+        base: dict[str, str | int] = metadata or {}
+
+        if paper:
+            base = {
+                **base,
+                "arxiv_id": paper.arxiv_id,
+                "title": paper.title,
+                "authors": ", ".join(paper.authors),
+                "published": paper.published,
+                "pdf_url": paper.pdf_url,
+            }
+
         text = self.extract_text(pdf_path)
-        return self.chunk_text(text, metadata=metadata)
+        return self.chunk_text(text, metadata=base)

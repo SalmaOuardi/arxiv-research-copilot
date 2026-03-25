@@ -13,7 +13,7 @@ from src.ingestion.processor import PDFProcessor
 
 def main():
     query = "transformer attention mechanism"
-    max_results = 50
+    max_results = 5
 
     # Step 1: Search and download
     print(f"Searching ArXiv for: '{query}'")
@@ -24,6 +24,9 @@ def main():
     paths = downloader.batch_download(papers)
     print(f"Downloaded {len(paths)} PDFs")
 
+    # Build lookup: arxiv_id -> PaperMetadata
+    paper_lookup = {p.arxiv_id: p for p in papers}
+
     # Step 2: Process PDFs into chunks
     output_dir = Path("./data/processed")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -31,8 +34,11 @@ def main():
     processor = PDFProcessor(chunk_size=1000, chunk_overlap=200)
 
     for pdf_path in paths:
-        print(f"Processing: {pdf_path.name}")
-        chunks = processor.process_pdf(pdf_path, metadata={"source": pdf_path.name})
+        arxiv_id = pdf_path.stem  # filename is {arxiv_id}.pdf
+        paper = paper_lookup.get(arxiv_id)
+        print(f"Processing: {pdf_path.name}" + (f" — {paper.title[:60]}" if paper else ""))
+
+        chunks = processor.process_pdf(pdf_path, paper=paper)
 
         output_file = output_dir / f"{pdf_path.stem}.json"
         chunk_dicts = [{"text": c.text, "metadata": c.metadata} for c in chunks]
