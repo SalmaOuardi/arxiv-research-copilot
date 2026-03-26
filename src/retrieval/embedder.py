@@ -1,125 +1,57 @@
-"""Embedding module for converting text to vector representations.
-
-Supports multiple embedding providers (OpenAI, Sentence Transformers)
-with a unified interface.
-"""
+"""Embedding module for converting text to vector representations using Ollama."""
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
-
-import numpy as np
+import time
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+
 
 class Embedder:
-    """Generates embeddings for documents and queries.
-
-    Provides a unified interface for multiple embedding backends
-    including OpenAI and Sentence Transformers.
+    """Generates embeddings via Ollama's OpenAI-compatible API.
 
     Args:
-        provider: Embedding provider ("openai" or "sentence-transformers").
-        model: Model name/identifier for the provider.
-        dimensions: Embedding vector dimensions (provider-dependent).
-
-    Example:
-        >>> embedder = Embedder(provider="openai", model="text-embedding-3-small")
-        >>> doc_embeddings = embedder.embed_documents(["text1", "text2"])
-        >>> query_embedding = embedder.embed_query("search query")
+        model: Ollama embedding model name.
+        batch_size: Number of texts per API call.
+        request_delay: Seconds to wait between batches.
     """
 
     def __init__(
         self,
-        provider: str = "openai",
-        model: str = "text-embedding-3-small",
-        dimensions: int = 1536,
+        model: str = "nomic-embed-text",
+        batch_size: int = 32,
+        request_delay: float = 0.1,
     ) -> None:
-        self.provider = provider
         self.model = model
-        self.dimensions = dimensions
-        self._client = None
+        self.batch_size = batch_size
+        self.request_delay = request_delay
+        self._client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
-        # TODO: Initialize the appropriate embedding client based on provider
-        # TODO: Validate provider/model combination
-
-    def embed_documents(
-        self,
-        texts: list[str],
-        batch_size: int = 100,
-    ) -> list[list[float]]:
-        """Generate embeddings for a list of documents.
-
-        Args:
-            texts: List of text strings to embed.
-            batch_size: Number of texts to embed per API call.
-
-        Returns:
-            List of embedding vectors (each a list of floats).
-
-        Raises:
-            ValueError: If texts list is empty.
-            RuntimeError: If the embedding API call fails.
-        """
-        # TODO: Implement OpenAI embedding with batching
-        # TODO: Implement Sentence Transformers embedding
-        # TODO: Add retry logic for API failures
-        # TODO: Add progress bar for large batches
-        # TODO: Cache embeddings to avoid recomputation
-
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed a list of documents. Returns one vector per text."""
         if not texts:
             raise ValueError("Cannot embed empty text list")
 
-        logger.info(
-            "Embedding %d documents with %s/%s",
-            len(texts),
-            self.provider,
-            self.model,
-        )
+        logger.info("Embedding %d documents with %s", len(texts), self.model)
+        embeddings = []
 
-        raise NotImplementedError("Document embedding not yet implemented")
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i : i + self.batch_size]
+            response = self._client.embeddings.create(model=self.model, input=batch)
+            embeddings.extend([item.embedding for item in response.data])
+            if i + self.batch_size < len(texts):
+                time.sleep(self.request_delay)
+
+        return embeddings
 
     def embed_query(self, text: str) -> list[float]:
-        """Generate embedding for a single query.
-
-        Some providers use different models/approaches for query vs.
-        document embeddings. This method handles that distinction.
-
-        Args:
-            text: Query text to embed.
-
-        Returns:
-            Embedding vector as a list of floats.
-
-        Raises:
-            ValueError: If text is empty.
-        """
-        # TODO: Implement query-specific embedding
-        # TODO: Some models (e.g., E5) require query prefixes like "query: "
-
+        """Embed a single query string."""
         if not text.strip():
             raise ValueError("Cannot embed empty query")
 
-        logger.info("Embedding query with %s/%s", self.provider, self.model)
-
-        raise NotImplementedError("Query embedding not yet implemented")
-
-    def compute_similarity(
-        self,
-        embedding_a: list[float],
-        embedding_b: list[float],
-    ) -> float:
-        """Compute cosine similarity between two embeddings.
-
-        Args:
-            embedding_a: First embedding vector.
-            embedding_b: Second embedding vector.
-
-        Returns:
-            Cosine similarity score between -1 and 1.
-        """
-        a = np.array(embedding_a)
-        b = np.array(embedding_b)
-        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+        response = self._client.embeddings.create(model=self.model, input=[text])
+        return response.data[0].embedding

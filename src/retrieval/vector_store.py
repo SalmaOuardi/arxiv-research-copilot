@@ -1,15 +1,16 @@
-"""Vector store module for storing and searching embeddings.
-
-Provides a unified interface to ChromaDB for vector similarity search
-with metadata filtering support.
-"""
+"""Vector store module using ChromaDB for persistent similarity search."""
 
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+import chromadb
+
+from src.retrieval.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +36,32 @@ class VectorStore:
     """Manages vector storage and similarity search using ChromaDB.
 
     Args:
+        embedder: Embedder instance used to embed queries and documents.
         collection_name: Name of the ChromaDB collection.
         persist_directory: Directory to persist the database.
-        embedding_function: Optional custom embedding function.
-
-    Example:
-        >>> store = VectorStore(collection_name="arxiv_papers")
-        >>> store.add_documents(texts=["..."], metadatas=[{...}], ids=["doc1"])
-        >>> results = store.search("attention mechanism", top_k=5)
     """
 
     def __init__(
         self,
+        embedder: Embedder,
         collection_name: str = "arxiv_papers",
         persist_directory: str | Path = "./data/embeddings",
-        embedding_function: Optional[Any] = None,
     ) -> None:
+        self.embedder = embedder
         self.collection_name = collection_name
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
-        self._collection = None
 
-        # TODO: Initialize ChromaDB client with persistence
-        # TODO: Get or create the named collection
-        # TODO: Configure embedding function (default or custom)
+        client = chromadb.PersistentClient(path=str(self.persist_directory))
+        self._collection = client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info(
+            "VectorStore ready. Collection '%s' has %d documents.",
+            collection_name,
+            self._collection.count(),
+        )
 
     def add_documents(
         self,
@@ -67,33 +70,35 @@ class VectorStore:
         ids: Optional[list[str]] = None,
         embeddings: Optional[list[list[float]]] = None,
     ) -> list[str]:
-        """Add documents to the vector store.
+        """Embed and store documents. Skips duplicates by ID (upsert).
 
         Args:
-            texts: List of document text strings.
-            metadatas: Optional list of metadata dicts per document.
-            ids: Optional list of unique IDs. Auto-generated if not provided.
-            embeddings: Optional pre-computed embeddings. If not provided,
-                the store's embedding function is used.
+            texts: Document text strings.
+            metadatas: Metadata dicts, one per document.
+            ids: Unique IDs. Auto-generated if not provided.
+            embeddings: Pre-computed embeddings. Computed if not provided.
 
         Returns:
-            List of document IDs that were added.
-
-        Raises:
-            ValueError: If texts list is empty or lengths don't match.
+            List of document IDs added.
         """
-        # TODO: Implement ChromaDB document insertion
-        # TODO: Auto-generate UUIDs if ids not provided
-        # TODO: Validate input lengths match
-        # TODO: Handle duplicate IDs (upsert behavior)
-        # TODO: Add batch processing for large document sets
-
         if not texts:
             raise ValueError("Cannot add empty document list")
 
-        logger.info("Adding %d documents to collection '%s'", len(texts), self.collection_name)
+        ids = ids or [str(uuid.uuid4()) for _ in texts]
+        metadatas = metadatas or [{} for _ in texts]
 
-        raise NotImplementedError("Document insertion not yet implemented")
+        if embeddings is None:
+            embeddings = self.embedder.embed_documents(texts)
+
+        self._collection.upsert(
+            ids=ids,
+            documents=texts,
+            embeddings=embeddings,
+            metadatas=metadatas,
+        )
+
+        logger.info("Added %d documents to '%s'", len(texts), self.collection_name)
+        return ids
 
     def search(
         self,
@@ -102,48 +107,40 @@ class VectorStore:
         filter_metadata: Optional[dict[str, Any]] = None,
         similarity_threshold: Optional[float] = None,
     ) -> list[SearchResult]:
-        """Search for similar documents.
+        """Search for documents similar to query.
 
         Args:
-            query: The search query text.
+            query: Natural language search query.
             top_k: Maximum number of results to return.
-            filter_metadata: Optional metadata filters (ChromaDB where clause).
-            similarity_threshold: Minimum similarity score to include.
+            filter_metadata: ChromaDB where clause for metadata filtering.
+            similarity_threshold: Minimum similarity score (0–1) to include.
 
         Returns:
-            List of SearchResult objects sorted by relevance.
+            List of SearchResult sorted by relevance (best first).
         """
-        # TODO: Implement ChromaDB query
-        # TODO: Apply metadata filtering
-        # TODO: Apply similarity threshold filtering
-        # TODO: Convert ChromaDB results to SearchResult objects
-        # TODO: Add hybrid search support (keyword + semantic)
+        query_embedding = self.embedder.embed_query(query)
 
-        logger.info(
-            "Searching '%s' in collection '%s' (top_k=%d)",
-            query,
-            self.collection_name,
-            top_k,
+        results = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=min(top_k, self._collection.count()),
+            where=filter_metadata,
+            include=["documents", "metadatas", "distances"],
         )
 
-        raise NotImplementedError("Vector search not yet implemented")
+        search_results = []
+        for doc, meta, distance, doc_id in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+            results["ids"][0],
+        ):
+            score = 1.0 - distance  # cosine distance → similarity
+            if similarity_threshold is not None and score < similarity_threshold:
+                continue
+            search_results.append(SearchResult(text=doc, metadata=meta, score=score, doc_id=doc_id))
 
-    def delete_documents(self, ids: list[str]) -> None:
-        """Delete documents from the vector store by ID.
-
-        Args:
-            ids: List of document IDs to delete.
-        """
-        # TODO: Implement ChromaDB document deletion
-
-        raise NotImplementedError("Document deletion not yet implemented")
+        return search_results
 
     def get_collection_stats(self) -> dict[str, Any]:
-        """Get statistics about the current collection.
-
-        Returns:
-            Dict with collection stats (count, etc.).
-        """
-        # TODO: Return collection count and metadata
-
-        raise NotImplementedError("Collection stats not yet implemented")
+        """Return basic stats about the collection."""
+        return {"collection": self.collection_name, "count": self._collection.count()}
