@@ -106,6 +106,7 @@ class VectorStore:
         top_k: int = 5,
         filter_metadata: Optional[dict[str, Any]] = None,
         similarity_threshold: Optional[float] = None,
+        context: Optional[str] = None,
     ) -> list[SearchResult]:
         """Search for documents similar to query.
 
@@ -114,11 +115,15 @@ class VectorStore:
             top_k: Maximum number of results to return.
             filter_metadata: ChromaDB where clause for metadata filtering.
             similarity_threshold: Minimum similarity score (0–1) to include.
+            context: Extra terms appended to the query before embedding,
+                     used to disambiguate short or ambiguous queries
+                     (e.g. "machine learning" when query is "transformer").
 
         Returns:
             List of SearchResult sorted by relevance (best first).
         """
-        query_embedding = self.embedder.embed_query(query)
+        embedded_query = f"{query} {context}" if context else query
+        query_embedding = self.embedder.embed_query(embedded_query)
 
         results = self._collection.query(
             query_embeddings=[query_embedding],
