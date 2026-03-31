@@ -89,7 +89,7 @@ class VectorStore:
 
         if embeddings is None:
             embeddings = self.embedder.embed_documents(texts)
-
+        # Upsert documents into the collection (adds new or updates existing by ID)   
         self._collection.upsert(
             ids=ids,
             documents=texts,

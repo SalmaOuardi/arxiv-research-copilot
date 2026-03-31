@@ -97,10 +97,3 @@ Provide the citation in the following formats:
 2. BibTeX entry
 
 Citation:"""
-
-
-# TODO: Add prompt template for comparing two specific papers
-# TODO: Add prompt template for extracting methodology details
-# TODO: Add prompt template for generating related work sections
-# TODO: Add prompt versioning/management system
-# TODO: Consider using LangChain PromptTemplate objects for variable validation
