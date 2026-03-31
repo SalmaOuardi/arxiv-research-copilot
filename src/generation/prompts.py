@@ -97,3 +97,55 @@ Provide the citation in the following formats:
 2. BibTeX entry
 
 Citation:"""
+
+
+# -- Claim Extractor Prompt --
+
+CLAIM_EXTRACTOR_TEMPLATE = """You are a research analyst reading an excerpt from an academic paper.
+
+Paper: "{title}" ({published})
+Authors: {authors}
+
+Excerpt:
+{chunks}
+
+Task: In 2-4 sentences, state what this paper specifically claims or contributes \
+regarding "{concept}". Be precise. Only use what is in the excerpt above — do not \
+add outside knowledge.
+
+Claim:"""
+
+
+# -- Narrative Generator Prompt --
+
+NARRATIVE_GENERATOR_TEMPLATE = """You are a science historian writing about the evolution of a research idea.
+
+Concept: "{concept}"
+
+Below is a chronological list of papers and what each one claimed:
+
+{timeline}
+
+Write a flowing narrative (4-8 paragraphs) tracing how "{concept}" evolved over time. \
+Show how later papers built on, challenged, or refined earlier ones. \
+Cite each paper as (Author et al., YEAR [arxiv_id]).
+
+Narrative:"""
+
+
+# -- Contradiction Detector Prompt --
+
+CONTRADICTION_DETECTOR_TEMPLATE = """You are a critical research analyst.
+
+Concept: "{concept}"
+
+Paper A: "{title_a}" ({year_a})
+Claim: {claim_a}
+
+Paper B: "{title_b}" ({year_b})
+Claim: {claim_b}
+
+Do these two claims contradict each other regarding "{concept}"?
+Answer YES or NO on the first line, then explain in 1-2 sentences.
+
+Answer:"""
