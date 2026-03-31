@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
+
+from tqdm import tqdm
 
 from src.generation.llm import LLMHandler
 from src.generation.prompts import (
@@ -68,15 +71,23 @@ class NarrativeEngine:
 
     def generate(self, concept: str) -> NarrativeOutput:
         """Generate an idea evolution narrative for a concept."""
+        total_start = time.time()
+
         # 1. Fetch papers on-demand
+        print(f"\n[1/5] Fetching papers for '{concept}'...")
+        t = time.time()
         self.pipeline.fetch_and_embed(concept)
+        print(f"      done ({time.time() - t:.1f}s)")
 
         # 2. Retrieve top chunks across all papers
+        print(f"[2/5] Retrieving relevant chunks...")
+        t = time.time()
         results = self.store.search(
             concept,
             top_k=self.papers_per_concept * self.chunks_per_paper,
             context="research paper academic",
         )
+        print(f"      {len(results)} chunks retrieved ({time.time() - t:.1f}s)")
 
         # 3. Group chunks by paper
         papers: dict[str, dict] = {}
@@ -95,10 +106,15 @@ class NarrativeEngine:
             if len(papers[aid]["chunks"]) < self.chunks_per_paper:
                 papers[aid]["chunks"].append(r.text)
 
+        print(f"      grouped into {len(papers)} papers")
+
         # 4. Extract one claim per paper
+        print(f"[3/5] Extracting claims ({len(papers)} LLM calls)...")
         claims: list[PaperClaim] = []
-        for paper in papers.values():
+        for paper in tqdm(papers.values(), desc="      claims", unit="paper"):
+            t = time.time()
             claim_text = self._extract_claim(paper, concept)
+            tqdm.write(f"      {paper['title'][:55]} ({time.time() - t:.1f}s)")
             claims.append(PaperClaim(
                 arxiv_id=paper["arxiv_id"],
                 title=paper["title"],
@@ -111,10 +127,18 @@ class NarrativeEngine:
         claims.sort(key=lambda c: c.published or "")
 
         # 6. Generate narrative
+        print(f"[4/5] Generating narrative...")
+        t = time.time()
         narrative = self._generate_narrative(concept, claims)
+        print(f"      done ({time.time() - t:.1f}s)")
 
         # 7. Detect contradictions
+        print(f"[5/5] Detecting contradictions ({len(claims) - 1} pairs)...")
+        t = time.time()
         contradictions = self._detect_contradictions(concept, claims)
+        print(f"      {len(contradictions)} contradiction(s) found ({time.time() - t:.1f}s)")
+
+        print(f"\nTotal: {time.time() - total_start:.1f}s")
 
         return NarrativeOutput(
             concept=concept,
