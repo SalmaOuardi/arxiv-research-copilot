@@ -1,136 +1,157 @@
-"""FastAPI application for the ArXiv Research Copilot.
-
-Provides REST API endpoints for paper search, retrieval, and
-question answering over academic papers.
-"""
+"""FastAPI application for the ArXiv Research Copilot."""
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from src.generation.llm import LLMHandler
+from src.generation.narrative import NarrativeEngine
+from src.ingestion.pipeline import QueryPipeline
+from src.retrieval.embedder import Embedder
+from src.retrieval.vector_store import VectorStore
+
+# ---------------------------------------------------------------------------
+# App state — initialized once on startup, shared across all requests
+# ---------------------------------------------------------------------------
+
+state: dict[str, Any] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize heavy objects once on startup, clean up on shutdown."""
+    embedder = Embedder()
+    store = VectorStore(embedder)
+    pipeline = QueryPipeline(store, max_results=8)
+    llm = LLMHandler()
+    engine = NarrativeEngine(pipeline, store, llm, papers_per_concept=8)
+
+    state["store"] = store
+    state["engine"] = engine
+    yield
+    state.clear()
+
+
 app = FastAPI(
     title="ArXiv Research Copilot",
-    description="RAG-powered API for academic paper search and Q&A",
-    version="0.1.0",
+    description="Agentic RAG system for idea evolution narratives",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 
-# -- Request/Response Models --
+# ---------------------------------------------------------------------------
+# Request / Response models
+# ---------------------------------------------------------------------------
+
+class NarrativeRequest(BaseModel):
+    concept: str = Field(..., description="Research concept to trace (e.g. 'attention mechanism')")
+    max_papers: int = Field(default=8, ge=1, le=20)
+
+
+class PaperClaimOut(BaseModel):
+    arxiv_id: str
+    title: str
+    authors: str
+    published: str
+    claim: str
+
+
+class ContradictionOut(BaseModel):
+    paper_a: str
+    paper_b: str
+    explanation: str
+
+
+class NarrativeResponse(BaseModel):
+    concept: str
+    narrative: str
+    timeline: list[PaperClaimOut]
+    contradictions: list[ContradictionOut]
 
 
 class SearchRequest(BaseModel):
-    """Request model for paper search."""
-
     query: str = Field(..., description="Natural language search query")
-    top_k: int = Field(default=5, ge=1, le=50, description="Number of results")
-    categories: Optional[list[str]] = Field(
-        default=None, description="ArXiv categories to filter by"
-    )
+    top_k: int = Field(default=5, ge=1, le=50)
+    context: str | None = Field(default=None, description="Extra terms to disambiguate the query")
 
 
-class SearchResult(BaseModel):
-    """A single search result."""
-
-    title: str
-    arxiv_id: str
-    authors: list[str]
-    abstract: str
+class SearchResultOut(BaseModel):
+    text: str
     score: float
-    categories: list[str]
+    arxiv_id: str
+    title: str
+    published: str
 
 
 class SearchResponse(BaseModel):
-    """Response model for paper search."""
-
     query: str
-    results: list[SearchResult]
-    total: int
-
-
-class QuestionRequest(BaseModel):
-    """Request model for question answering."""
-
-    question: str = Field(..., description="Question about papers")
-    top_k: int = Field(default=5, ge=1, le=20, description="Context documents")
-
-
-class QuestionResponse(BaseModel):
-    """Response model for question answering."""
-
-    question: str
-    answer: str
-    sources: list[dict[str, Any]]
-    model: str
+    results: list[SearchResultOut]
 
 
 class HealthResponse(BaseModel):
-    """Response model for health check."""
-
     status: str
     version: str
+    indexed_documents: int
 
 
-# -- Endpoints --
-
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """Health check endpoint."""
-    return HealthResponse(status="healthy", version="0.1.0")
+    store: VectorStore = state.get("store")
+    count = store.get_collection_stats()["count"] if store else 0
+    return HealthResponse(status="healthy", version="0.2.0", indexed_documents=count)
+
+
+@app.post("/narrative", response_model=NarrativeResponse)
+async def generate_narrative(request: NarrativeRequest) -> NarrativeResponse:
+    """Fetch ArXiv papers on-demand and generate an idea evolution narrative."""
+    engine: NarrativeEngine = state.get("engine")
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    try:
+        output = engine.generate(request.concept)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return NarrativeResponse(
+        concept=output.concept,
+        narrative=output.narrative,
+        timeline=[PaperClaimOut(**c.__dict__) for c in output.timeline],
+        contradictions=[ContradictionOut(**c.__dict__) for c in output.contradictions],
+    )
 
 
 @app.post("/search", response_model=SearchResponse)
-async def search_papers(request: SearchRequest) -> SearchResponse:
-    """Search for relevant papers using semantic search.
+async def search(request: SearchRequest) -> SearchResponse:
+    """Semantic search over indexed papers."""
+    store: VectorStore = state.get("store")
+    if not store:
+        raise HTTPException(status_code=503, detail="Store not initialized")
 
-    Args:
-        request: Search request with query and parameters.
+    try:
+        results = store.search(request.query, top_k=request.top_k, context=request.context)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    Returns:
-        Search response with matching papers.
-    """
-    # TODO: Initialize vector store and embedder
-    # TODO: Perform semantic search
-    # TODO: Enrich results with paper metadata
-    # TODO: Add error handling for missing index
-
-    raise HTTPException(status_code=501, detail="Search not yet implemented")
-
-
-@app.post("/ask", response_model=QuestionResponse)
-async def ask_question(request: QuestionRequest) -> QuestionResponse:
-    """Answer a question using RAG over indexed papers.
-
-    Args:
-        request: Question request with the query.
-
-    Returns:
-        Generated answer with source citations.
-    """
-    # TODO: Retrieve relevant context documents
-    # TODO: Generate answer using LLM with context
-    # TODO: Format and return response with sources
-
-    raise HTTPException(status_code=501, detail="Q&A not yet implemented")
-
-
-@app.post("/ingest")
-async def ingest_papers(query: str, max_papers: int = 10) -> dict[str, Any]:
-    """Ingest papers from ArXiv into the vector store.
-
-    Args:
-        query: ArXiv search query for papers to ingest.
-        max_papers: Maximum number of papers to ingest.
-
-    Returns:
-        Summary of ingestion results.
-    """
-    # TODO: Search ArXiv for papers
-    # TODO: Download and process PDFs
-    # TODO: Generate embeddings and store in vector DB
-    # TODO: Return ingestion summary
-
-    raise HTTPException(status_code=501, detail="Ingestion not yet implemented")
+    return SearchResponse(
+        query=request.query,
+        results=[
+            SearchResultOut(
+                text=r.text,
+                score=round(r.score, 4),
+                arxiv_id=r.metadata.get("arxiv_id", ""),
+                title=r.metadata.get("title", ""),
+                published=r.metadata.get("published", ""),
+            )
+            for r in results
+        ],
+    )
