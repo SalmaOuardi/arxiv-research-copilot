@@ -1,120 +1,134 @@
-"""Streamlit UI for the ArXiv Research Copilot.
-
-Provides an interactive web interface for searching papers,
-asking questions, and exploring results.
-"""
+"""Streamlit UI for the ArXiv Research Copilot."""
 
 from __future__ import annotations
 
+import requests
 import streamlit as st
 
-# -- Page Configuration --
+API_URL = "http://localhost:8000"
 
 st.set_page_config(
-    page_title="ArXiv Research Copilot",
-    page_icon="📚",
+    page_title="ArXiv Copilot",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
 
-def render_sidebar() -> dict:
-    """Render the sidebar with configuration options.
+with st.sidebar:
+    st.title("ArXiv Copilot")
+    st.caption("Idea evolution narratives from academic papers")
+    st.divider()
 
-    Returns:
-        Dict of user-selected configuration values.
-    """
-    st.sidebar.title("⚙️ Settings")
+    try:
+        health = requests.get(f"{API_URL}/health", timeout=3).json()
+        st.success(f"API online — {health['indexed_documents']} chunks indexed")
+    except Exception:
+        st.error("API offline. Run: uvicorn src.api.main:app --reload")
 
-    top_k = st.sidebar.slider("Number of results", min_value=1, max_value=20, value=5)
+    st.divider()
+    max_papers = st.slider("Papers to fetch", min_value=3, max_value=15, value=8)
 
-    categories = st.sidebar.multiselect(
-        "ArXiv Categories",
-        options=["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.IR", "stat.ML"],
-        default=["cs.AI", "cs.LG"],
+# ---------------------------------------------------------------------------
+# Tabs
+# ---------------------------------------------------------------------------
+
+tab_narrative, tab_search = st.tabs(["Narrative", "Search"])
+
+# ---------------------------------------------------------------------------
+# Narrative tab
+# ---------------------------------------------------------------------------
+
+with tab_narrative:
+    st.header("Idea Evolution Narrative")
+    st.caption("Type a concept — the system fetches relevant ArXiv papers and writes the intellectual history.")
+
+    concept = st.text_input(
+        "Concept",
+        placeholder="e.g. attention mechanism, reinforcement learning from human feedback",
     )
 
-    model = st.sidebar.selectbox(
-        "LLM Model",
-        options=["gpt-4", "gpt-3.5-turbo"],
-        index=0,
-    )
+    if st.button("Generate narrative", type="primary") and concept:
+        with st.spinner(f"Fetching papers and generating narrative for '{concept}'... (this takes a few minutes)"):
+            try:
+                resp = requests.post(
+                    f"{API_URL}/narrative",
+                    json={"concept": concept, "max_papers": max_papers},
+                    timeout=600,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except requests.exceptions.Timeout:
+                st.error("Request timed out. Try a shorter concept or fewer papers.")
+                st.stop()
+            except Exception as e:
+                st.error(f"API error: {e}")
+                st.stop()
 
-    return {"top_k": top_k, "categories": categories, "model": model}
+        # -- Narrative --
+        st.subheader("Narrative")
+        st.markdown(data["narrative"])
 
+        st.divider()
 
-def render_search_tab() -> None:
-    """Render the paper search interface."""
-    st.header("🔍 Paper Search")
+        # -- Timeline --
+        st.subheader(f"Timeline — {len(data['timeline'])} papers")
+        for paper in data["timeline"]:
+            year = paper["published"][:4] if paper["published"] else "????"
+            with st.expander(f"{year} · {paper['title']}"):
+                st.caption(f"{paper['authors']} · [{paper['arxiv_id']}](https://arxiv.org/abs/{paper['arxiv_id']})")
+                st.markdown(paper["claim"])
 
-    query = st.text_input(
-        "Search query",
-        placeholder="e.g., transformer attention mechanisms for NLP",
-    )
+        # -- Contradictions --
+        if data["contradictions"]:
+            st.divider()
+            st.subheader(f"Contradictions detected — {len(data['contradictions'])}")
+            for c in data["contradictions"]:
+                st.warning(
+                    f"**{c['paper_a']}** vs **{c['paper_b']}**\n\n{c['explanation']}",
+                    icon="⚠️",
+                )
+        else:
+            st.caption("No contradictions detected between consecutive papers.")
+
+        # -- Export --
+        st.divider()
+        md = f"# {concept}\n\n{data['narrative']}\n\n---\n\n## Timeline\n\n"
+        for paper in data["timeline"]:
+            year = paper["published"][:4] if paper["published"] else "????"
+            md += f"### {year} · {paper['title']}\n{paper['claim']}\n\n"
+        st.download_button("Export as markdown", data=md, file_name=f"{concept.replace(' ', '_')}.md")
+
+# ---------------------------------------------------------------------------
+# Search tab
+# ---------------------------------------------------------------------------
+
+with tab_search:
+    st.header("Semantic Search")
+    st.caption("Search across all indexed papers.")
+
+    query = st.text_input("Query", placeholder="e.g. transformer self-attention")
+    context = st.text_input("Disambiguation context (optional)", placeholder="e.g. machine learning neural network")
+    top_k = st.slider("Results", min_value=1, max_value=20, value=5)
 
     if st.button("Search", type="primary") and query:
-        with st.spinner("Searching papers..."):
-            # TODO: Call search API endpoint
-            # TODO: Display results with expandable abstracts
-            # TODO: Add download/save functionality
-            st.info("Search functionality not yet implemented. Connect to the API backend.")
+        with st.spinner("Searching..."):
+            try:
+                resp = requests.post(
+                    f"{API_URL}/search",
+                    json={"query": query, "top_k": top_k, "context": context or None},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                results = resp.json()["results"]
+            except Exception as e:
+                st.error(f"API error: {e}")
+                st.stop()
 
-
-def render_qa_tab() -> None:
-    """Render the question answering interface."""
-    st.header("💬 Ask a Question")
-
-    question = st.text_area(
-        "Your question",
-        placeholder="e.g., What are the main advantages of attention mechanisms over RNNs?",
-        height=100,
-    )
-
-    if st.button("Ask", type="primary") and question:
-        with st.spinner("Generating answer..."):
-            # TODO: Call Q&A API endpoint
-            # TODO: Display answer with formatted citations
-            # TODO: Show source documents in expandable sections
-            st.info("Q&A functionality not yet implemented. Connect to the API backend.")
-
-
-def render_ingest_tab() -> None:
-    """Render the paper ingestion interface."""
-    st.header("📥 Ingest Papers")
-
-    ingest_query = st.text_input(
-        "ArXiv search query for ingestion",
-        placeholder="e.g., large language models 2024",
-    )
-
-    max_papers = st.number_input("Max papers to ingest", min_value=1, max_value=100, value=10)
-
-    if st.button("Ingest Papers", type="primary") and ingest_query:
-        with st.spinner("Ingesting papers..."):
-            # TODO: Call ingest API endpoint
-            # TODO: Show progress bar
-            # TODO: Display ingestion summary
-            st.info("Ingestion functionality not yet implemented. Connect to the API backend.")
-
-
-def main() -> None:
-    """Main application entry point."""
-    st.title("📚 ArXiv Research Copilot")
-    st.caption("Semantic search and Q&A over academic papers")
-
-    config = render_sidebar()
-
-    tab_search, tab_qa, tab_ingest = st.tabs(["🔍 Search", "💬 Q&A", "📥 Ingest"])
-
-    with tab_search:
-        render_search_tab()
-
-    with tab_qa:
-        render_qa_tab()
-
-    with tab_ingest:
-        render_ingest_tab()
-
-
-if __name__ == "__main__":
-    main()
+        st.caption(f"{len(results)} results for '{query}'")
+        for r in results:
+            with st.expander(f"{r['score']:.3f} · {r['title'] or r['arxiv_id']}"):
+                st.caption(f"[{r['arxiv_id']}](https://arxiv.org/abs/{r['arxiv_id']}) · {r['published'][:10]}")
+                st.markdown(r["text"])
