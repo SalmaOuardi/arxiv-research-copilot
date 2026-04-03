@@ -64,7 +64,10 @@ class ArXivDownloader:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_results = max_results
         self.rate_limit_seconds = rate_limit_seconds
-        self.client = arxiv.Client()
+        self.client = arxiv.Client(
+            delay_seconds=5.0,
+            num_retries=5,
+        )
         self._search_cache: dict[str, list[PaperMetadata]] = {}
 
     def search_papers(

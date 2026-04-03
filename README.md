@@ -1,106 +1,117 @@
 # ArXiv Research Copilot
 
-> Advanced RAG system for academic paper search, analysis, and Q&A
+Idea-evolution copilot for research concepts: fetch papers from ArXiv on demand, index them in ChromaDB, and generate a chronological narrative with citation grounding.
 
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+## What This Project Is Now
 
-## 🎯 Overview
+The project has shifted from a generic "RAG Q&A app" toward a focused **narrative engine**:
 
-ArXiv Research Copilot is a production-grade Retrieval-Augmented Generation (RAG) system designed to help researchers efficiently search, analyze, and interact with academic papers from ArXiv. Built with modern ML/AI stack including LangChain, OpenAI, and vector databases.
+- Input: a concept (for example, `"attention mechanism"`).
+- Pipeline: live ArXiv fetch -> PDF processing -> chunking -> embedding -> vector indexing.
+- Output: an LLM-generated timeline narrative showing how the idea evolved, plus contradiction checks between adjacent claims.
 
-## ✨ Features
+## Current Implemented Scope
 
-- **Semantic Search**: Find relevant papers using natural language queries
-- **Multi-Modal Processing**: Handle text, equations, and figures from papers
-- **Citation Tracking**: Maintain accurate citations and references
-- **Advanced RAG**: Hybrid search with reranking and query expansion
-- **Production-Ready API**: FastAPI backend with comprehensive endpoints
-- **Interactive UI**: Streamlit demo for easy interaction
-- **Extensible Architecture**: Modular design for easy customization
+- `ArXivDownloader` with search, category filtering, caching, and PDF download.
+- `PDFProcessor` with text extraction (PyMuPDF) and chunking.
+- `Embedder` using Ollama's OpenAI-compatible API (`nomic-embed-text` by default).
+- `VectorStore` on persistent ChromaDB with semantic search and metadata.
+- `QueryPipeline.fetch_and_embed(concept)` for on-demand indexing with deduplication.
+- `NarrativeEngine.generate(concept)` for claim extraction, chronological sorting, narrative generation, and contradiction detection.
 
-## 🛠️ Tech Stack
+Note: FastAPI and Streamlit entry points exist, but most endpoints and UI actions are still scaffolded (`501`/TODO).
 
-- **LLM Framework**: LangChain, LlamaIndex
-- **Vector Database**: ChromaDB (local), Qdrant-ready
-- **LLM Provider**: OpenAI GPT-4
-- **Embeddings**: OpenAI text-embedding-3, Sentence Transformers
-- **Backend**: FastAPI, Pydantic
-- **Frontend**: Streamlit
-- **Data Source**: ArXiv API
-- **PDF Processing**: PyPDF2, PyMuPDF
+## Tech Stack
 
-## 🚀 Quick Start
+- Python 3.11+
+- Ollama (local)
+- ChromaDB
+- OpenAI-compatible client (`openai` package) targeting Ollama
+- ArXiv API (`arxiv` package)
+- PyMuPDF for PDF text extraction
 
-### Installation
+## Quick Start
+
+### 1) Install
+
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/arxiv-research-copilot.git
+git clone https://github.com/SalmaOuardi/arxiv-research-copilot.git
 cd arxiv-research-copilot
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-make install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env and add your API keys
+uv sync
 ```
 
-### Usage
+### 2) Start Ollama and pull models
+
 ```bash
-# Run the API server
-make api
-
-# In another terminal, run the UI
-make ui
+ollama pull nomic-embed-text
+ollama pull qwen2.5:7b
+ollama serve
 ```
 
-Visit http://localhost:8501 for the Streamlit UI or http://localhost:8000/docs for API documentation.
+The code expects Ollama at `http://localhost:11434/v1`.
 
-## 📁 Project Structure
-```
-arxiv-research-copilot/
-├── src/
-│   ├── ingestion/      # Data download and processing
-│   ├── retrieval/      # Vector search and embeddings
-│   ├── generation/     # LLM integration and prompts
-│   ├── api/            # FastAPI backend
-│   ├── ui/             # Streamlit frontend
-│   └── utils/          # Shared utilities
-├── data/               # Local data storage (gitignored)
-├── tests/              # Unit and integration tests
-├── notebooks/          # Jupyter notebooks for experiments
-├── scripts/            # Utility scripts
-└── config/             # Configuration files
+### 3) Run tests
+
+```bash
+make test
 ```
 
-## 🗺️ Roadmap
+### 4) Run an ingestion script (optional)
 
-- [x] Project setup and architecture
-- [ ] ArXiv data ingestion pipeline (downloader done, PDF processing next)
-- [ ] Vector database implementation
-- [ ] Basic RAG with citations
-- [ ] Advanced retrieval (hybrid search, reranking)
-- [ ] Multi-modal support (equations, figures)
-- [ ] Production deployment
-- [ ] Evaluation framework
-- [ ] Multi-language support
+```bash
+uv run python scripts/run_ingestion.py
+```
 
-## 🤝 Contributing
+## Programmatic Usage (Narrative Engine)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+```python
+from src.generation.llm import LLMHandler
+from src.generation.narrative import NarrativeEngine
+from src.ingestion.pipeline import QueryPipeline
+from src.retrieval.embedder import Embedder
+from src.retrieval.vector_store import VectorStore
 
-## 📄 License
+embedder = Embedder(model="nomic-embed-text")
+store = VectorStore(embedder=embedder)
+pipeline = QueryPipeline(vector_store=store, max_results=8)
+llm = LLMHandler(model="qwen2.5:7b")
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+engine = NarrativeEngine(
+    pipeline=pipeline,
+    vector_store=store,
+    llm=llm,
+    papers_per_concept=8,
+    chunks_per_paper=3,
+)
 
-## 📧 Contact
+result = engine.generate("attention mechanism")
+print(result.narrative)
+```
 
-Your Name - [@yourhandle](https://twitter.com/yourhandle)
+## Project Structure
 
-Project Link: [https://github.com/yourusername/arxiv-research-copilot](https://github.com/yourusername/arxiv-research-copilot)
+```text
+src/
+  ingestion/    # ArXiv search/download + PDF processing + on-demand pipeline
+  retrieval/    # Embedding client + Chroma vector store
+  generation/   # Prompts + LLM handler + narrative engine
+  api/          # FastAPI scaffold (partially implemented)
+  ui/           # Streamlit scaffold (partially implemented)
+tests/          # Unit tests for ingestion/retrieval/generation modules
+scripts/        # Utility scripts for download/process/full ingestion
+```
+
+## Development Commands
+
+```bash
+make install       # uv sync
+make test          # pytest
+make format        # black + ruff --fix
+make lint          # black --check + ruff
+make api           # run FastAPI app
+make ui            # run Streamlit app
+```
+
+## License
+
+MIT (see `LICENSE`).
