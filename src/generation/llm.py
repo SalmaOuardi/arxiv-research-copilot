@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from openai import OpenAI
 
+from src.utils.tracing import get_langfuse, observe
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
@@ -30,6 +32,7 @@ class LLMHandler:
         self.max_tokens = max_tokens
         self._client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
+    @observe(name="llm.generate")
     def generate(self, prompt: str, temperature: float | None = None) -> str:
         """Send a prompt and return the model's response as a string.
 
@@ -47,5 +50,9 @@ class LLMHandler:
             max_tokens=self.max_tokens,
         )
         result = response.choices[0].message.content
+        get_langfuse().update_current_generation(
+            model=self.model,
+            metadata={"temperature": temperature or self.temperature},
+        )
         logger.info("Generated %d chars with %s", len(result), self.model)
         return result

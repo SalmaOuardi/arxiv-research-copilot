@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 
 from tqdm import tqdm
 
+from src.utils.tracing import get_langfuse, observe
+
 from src.generation.llm import LLMHandler
 from src.generation.prompts import (
     CLAIM_EXTRACTOR_TEMPLATE,
@@ -69,8 +71,10 @@ class NarrativeEngine:
         self.papers_per_concept = papers_per_concept
         self.chunks_per_paper = chunks_per_paper
 
+    @observe(name="narrative.generate")
     def generate(self, concept: str) -> NarrativeOutput:
         """Generate an idea evolution narrative for a concept."""
+        get_langfuse().set_current_trace_io(input=concept)
         total_start = time.time()
 
         # 1. Fetch papers on-demand
@@ -140,13 +144,18 @@ class NarrativeEngine:
 
         print(f"\nTotal: {time.time() - total_start:.1f}s")
 
-        return NarrativeOutput(
+        output = NarrativeOutput(
             concept=concept,
             narrative=narrative,
             timeline=claims,
             contradictions=contradictions,
         )
+        get_langfuse().set_current_trace_io(
+            output={"papers": len(claims), "contradictions": len(contradictions)}
+        )
+        return output
 
+    @observe(name="narrative.extract_claim")
     def _extract_claim(self, paper: dict, concept: str) -> str:
         prompt = CLAIM_EXTRACTOR_TEMPLATE.format(
             title=paper["title"],
@@ -157,6 +166,7 @@ class NarrativeEngine:
         )
         return self.llm.generate(prompt)
 
+    @observe(name="narrative.generate_narrative")
     def _generate_narrative(self, concept: str, claims: list[PaperClaim]) -> str:
         timeline_text = "\n\n".join([
             f"[{c.published[:4] if c.published else '????'}] {c.title} ({c.arxiv_id})\n{c.claim}"
@@ -168,6 +178,7 @@ class NarrativeEngine:
         )
         return self.llm.generate(prompt, temperature=0.3)
 
+    @observe(name="narrative.detect_contradictions")
     def _detect_contradictions(self, concept: str, claims: list[PaperClaim]) -> list[Contradiction]:
         contradictions = []
         for i in range(len(claims) - 1):

@@ -11,6 +11,7 @@ from typing import Any, Optional
 import chromadb
 
 from src.retrieval.embedder import Embedder
+from src.utils.tracing import get_langfuse, observe
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ class VectorStore:
         logger.info("Added %d documents to '%s'", len(texts), self.collection_name)
         return ids
 
+    @observe(name="vectorstore.search")
     def search(
         self,
         query: str,
@@ -144,6 +146,14 @@ class VectorStore:
                 continue
             search_results.append(SearchResult(text=doc, metadata=meta, score=score, doc_id=doc_id))
 
+        get_langfuse().update_current_span(
+            metadata={
+                "top_k": top_k,
+                "context": context,
+                "results_count": len(search_results),
+                "top_score": round(search_results[0].score, 4) if search_results else None,
+            },
+        )
         return search_results
 
     def get_collection_stats(self) -> dict[str, Any]:
